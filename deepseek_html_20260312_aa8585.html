@@ -1121,6 +1121,15 @@
             isDragging = false; dragStart = null;
         }, { passive: false });
 
+        canvas.addEventListener('touchcancel', e => {
+            e.preventDefault();
+            isDragging = false;
+            dragStart = null;
+            hoveredPoint = null;
+            hoveredStick = null;
+            hoveredWeldPos = null;
+        }, { passive: false });
+
         window.toggleMobileSidebar = function() {
             const sidebar = document.getElementById('sidebar');
             sidebar.classList.toggle('collapsed');
