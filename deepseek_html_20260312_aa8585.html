@@ -316,14 +316,14 @@
 
         function getWindForceAtY(y) {
             if (!isSimulating || !envActive || env.wind <= 0) return 0;
-            const amplitude = (groundY - y) / 1000 * (env.wind / 0.4);
+            const amplitude = (groundY - y) / 780 * (env.wind / 0.22);
             return Math.sin(Date.now() / 350) * amplitude * envRampUp;
         }
 
         function getQuakeOffsets() {
             if (!isSimulating || !envActive || env.quake <= 0) return { x: 0, y: 0 };
             const t = Date.now();
-            return { x: Math.sin(t / 50) * (env.quake / 10), y: Math.cos(t / 65) * (env.quake / 15) };
+            return { x: Math.sin(t / 50) * (env.quake / 7), y: Math.cos(t / 65) * (env.quake / 10) };
         }
 
         class Debris {
@@ -402,7 +402,7 @@
                 this.y += CONFIG.gravity; 
                 
                 if (envActive && groundY - this.y > 100) {
-                    this.y += env.load * 0.2 * envRampUp;
+                    this.y += env.load * 0.34 * envRampUp;
                 } 
                 
                 let windForce = getWindForceAtY(this.y);
@@ -411,8 +411,8 @@
                 this.x += vx; this.y += vy;
                 
                 if (envActive && isSimulating && env.quake > 0 && !this.pinned) {
-                    this.x += (Math.random() - 0.5) * (env.quake / 1.6) * envRampUp;
-                    this.y += (Math.random() - 0.5) * (env.quake / 2.4) * envRampUp;
+                    this.x += (Math.random() - 0.5) * (env.quake / 1.1) * envRampUp;
+                    this.y += (Math.random() - 0.5) * (env.quake / 1.6) * envRampUp;
                 }
             }
 

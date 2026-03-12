@@ -48,39 +48,15 @@ function runMonteCarloForMaterial(materialStrength, rounds = 5000) {
   for (let i = 0; i < rounds; i++) {
     const jitter = () => (Math.random() - 0.5) * 0.16;
 
-    const single = capacityScore({
-      materialStrength,
-      len: 120 * (1 + jitter()),
-      deg1: 1,
-      deg2: 1,
-      compressionRatio: 0.42 * (1 + jitter()),
-    });
-
-    const triangle = capacityScore({
-      materialStrength,
-      len: 85 * (1 + jitter()),
-      deg1: 3,
-      deg2: 3,
-      compressionRatio: 0.27 * (1 + jitter()),
-    });
-
-    const lattice = capacityScore({
-      materialStrength,
-      len: 62 * (1 + jitter()),
-      deg1: 4,
-      deg2: 5,
-      compressionRatio: 0.2 * (1 + jitter()),
-    });
+    const single = capacityScore({ materialStrength, len: 120 * (1 + jitter()), deg1: 1, deg2: 1, compressionRatio: 0.42 * (1 + jitter()) });
+    const triangle = capacityScore({ materialStrength, len: 85 * (1 + jitter()), deg1: 3, deg2: 3, compressionRatio: 0.27 * (1 + jitter()) });
+    const lattice = capacityScore({ materialStrength, len: 62 * (1 + jitter()), deg1: 4, deg2: 5, compressionRatio: 0.2 * (1 + jitter()) });
 
     if (lattice > triangle) winsComplex++;
     if (triangle > single && lattice > single) winsAgainstSingle++;
   }
 
-  return {
-    rounds,
-    complexBeatsTriangleRate: winsComplex / rounds,
-    complexAndTriangleBeatSingleRate: winsAgainstSingle / rounds,
-  };
+  return { rounds, complexBeatsTriangleRate: winsComplex / rounds, complexAndTriangleBeatSingleRate: winsAgainstSingle / rounds };
 }
 
 function runEdgeChecksForAllMaterials() {
@@ -92,46 +68,44 @@ function runEdgeChecksForAllMaterials() {
   ];
 
   return cases.map(c => {
-    const byMaterial = Object.fromEntries(
-      Object.entries(MATERIALS).map(([id, mat]) => [
-        id,
-        Number(capacityScore({ materialStrength: mat.strength, ...c }).toFixed(2)),
-      ])
-    );
-
+    const byMaterial = Object.fromEntries(Object.entries(MATERIALS).map(([id, mat]) => [id, Number(capacityScore({ materialStrength: mat.strength, ...c }).toFixed(2))]));
     return { ...c, capacity: byMaterial };
   });
 }
 
-function runBreakageFrequencyForMaterial(materialId, rounds = 4000) {
+const AXIS_CASES = {
+  wind: { strainBase: 6.2, compressionRatio: 0.52, len: 112 },
+  quake: { strainBase: 7.1, compressionRatio: 0.56, len: 116 },
+  load: { strainBase: 8.3, compressionRatio: 0.62, len: 120 },
+};
+
+function runSingleAxisBreakageForMaterial(materialId, rounds = 2000) {
   const materialStrength = MATERIALS[materialId].strength;
-  let brokenCount = 0;
+  const axisStats = {};
 
-  for (let i = 0; i < rounds; i++) {
-    const jitter = () => (Math.random() - 0.5) * 0.22;
-    const overloadMultiplier =
-      Math.random() < 0.12
-        ? 3.5 + Math.random() * 1.8 // 少量极端冲击，确保高强材料也能出现断裂样本
-        : 1 + Math.random() * 0.9; // 常规高压扰动
+  for (const [axis, profile] of Object.entries(AXIS_CASES)) {
+    let brokenCount = 0;
 
-    const stress = memberStress({
-      strain: 8.8 * overloadMultiplier * (1 + jitter()),
-      compressionRatio: 0.58 * (1 + jitter()),
-      len: 116 * (1 + jitter()),
-      deg1: 1,
-      deg2: 1,
-    });
+    for (let i = 0; i < rounds; i++) {
+      const jitter = () => (Math.random() - 0.5) * 0.2;
+      const overload = Math.random() < 0.1 ? 2.8 + Math.random() * 1.2 : 1 + Math.random() * 0.85;
 
-    if (stress > materialStrength) {
-      brokenCount++;
+      // 单轴测试：每轮只使用当前 axis 对应扰动模型，其它两项视为 0
+      const stress = memberStress({
+        strain: profile.strainBase * overload * (1 + jitter()),
+        compressionRatio: profile.compressionRatio * (1 + jitter()),
+        len: profile.len * (1 + jitter()),
+        deg1: 1,
+        deg2: 1,
+      });
+
+      if (stress > materialStrength) brokenCount++;
     }
+
+    axisStats[axis] = { rounds, brokenCount, breakRate: brokenCount / rounds };
   }
 
-  return {
-    rounds,
-    brokenCount,
-    breakRate: brokenCount / rounds,
-  };
+  return axisStats;
 }
 
 function assertMaterialOrdering() {
@@ -139,51 +113,53 @@ function assertMaterialOrdering() {
   const wood = capacityScore({ materialStrength: MATERIALS.wood.strength, ...shape });
   const steel = capacityScore({ materialStrength: MATERIALS.steel.strength, ...shape });
   const carbon = capacityScore({ materialStrength: MATERIALS.carbon.strength, ...shape });
-
-  if (!(wood < steel && steel < carbon)) {
-    throw new Error('材料强度层级异常：期望 wood < steel < carbon');
-  }
+  if (!(wood < steel && steel < carbon)) throw new Error('材料强度层级异常：期望 wood < steel < carbon');
 }
 
-function assertBreakageVisibility(breakageByMaterial) {
-  for (const [id, summary] of Object.entries(breakageByMaterial)) {
-    if (summary.brokenCount === 0) {
-      throw new Error(`[${id}] 在高压单杆场景中未出现断裂，无法体现该材料断裂行为`);
+function aggregateBreakage(statsByAxis) {
+  const totals = Object.values(statsByAxis).reduce((acc, s) => {
+    acc.rounds += s.rounds;
+    acc.brokenCount += s.brokenCount;
+    return acc;
+  }, { rounds: 0, brokenCount: 0 });
+  return { ...totals, breakRate: totals.brokenCount / totals.rounds };
+}
+
+function assertSingleAxisBreakage(breakageByMaterial) {
+  const totalByMaterial = Object.fromEntries(Object.entries(breakageByMaterial).map(([id, axisStats]) => [id, aggregateBreakage(axisStats)]));
+
+  for (const [id, axisStats] of Object.entries(breakageByMaterial)) {
+    const hasBreakInAnySingleAxis = Object.values(axisStats).some(summary => summary.brokenCount > 0);
+    if (!hasBreakInAnySingleAxis) {
+      throw new Error(`[${id}] 在所有单轴场景都无断裂，无法体现单轴测试结果`);
     }
   }
 
-  if (breakageByMaterial.wood.breakRate < 0.65) {
-    throw new Error(`木条断裂率偏低(${breakageByMaterial.wood.breakRate.toFixed(3)}), 未达到“经常断裂”预期`);
+  if (totalByMaterial.wood.breakRate < 0.65) {
+    throw new Error(`木条综合断裂率偏低(${totalByMaterial.wood.breakRate.toFixed(3)}), 未达到“经常断裂”预期`);
   }
 
-  if (!(breakageByMaterial.wood.breakRate > breakageByMaterial.steel.breakRate && breakageByMaterial.steel.breakRate > breakageByMaterial.carbon.breakRate)) {
-    throw new Error('断裂频率层级异常：期望 wood > steel > carbon');
+  if (!(totalByMaterial.wood.breakRate > totalByMaterial.steel.breakRate && totalByMaterial.steel.breakRate > totalByMaterial.carbon.breakRate)) {
+    throw new Error('综合断裂频率层级异常：期望 wood > steel > carbon');
   }
+
+  return totalByMaterial;
 }
 
-const monteCarloByMaterial = Object.fromEntries(
-  Object.entries(MATERIALS).map(([id, mat]) => [id, runMonteCarloForMaterial(mat.strength)])
-);
+const monteCarloByMaterial = Object.fromEntries(Object.entries(MATERIALS).map(([id, mat]) => [id, runMonteCarloForMaterial(mat.strength)]));
 const edgeCases = runEdgeChecksForAllMaterials();
-const breakageByMaterial = Object.fromEntries(
-  Object.keys(MATERIALS).map(id => [id, runBreakageFrequencyForMaterial(id)])
-);
+const breakageByMaterial = Object.fromEntries(Object.keys(MATERIALS).map(id => [id, runSingleAxisBreakageForMaterial(id)]));
 
-console.log('Materials:', Object.fromEntries(
-  Object.entries(MATERIALS).map(([id, m]) => [id, { strength: m.strength, stiffness: m.stiffness, nodeStrength: m.nodeStrength }])
-));
+console.log('Materials:', Object.fromEntries(Object.entries(MATERIALS).map(([id, m]) => [id, { strength: m.strength, stiffness: m.stiffness, nodeStrength: m.nodeStrength }])));
 console.log('MonteCarloByMaterial:', monteCarloByMaterial);
 console.log('EdgeCasesByMaterial:', edgeCases);
-console.log('BreakageByMaterial:', breakageByMaterial);
+console.log('SingleAxisBreakageByMaterial:', breakageByMaterial);
 
 for (const [id, result] of Object.entries(monteCarloByMaterial)) {
-  if (result.complexBeatsTriangleRate < 0.9) {
-    throw new Error(`[${id}] 复杂结构对三角结构优势不足，参数需要继续调优`);
-  }
-  if (result.complexAndTriangleBeatSingleRate < 0.92) {
-    throw new Error(`[${id}] 单杆仍然过强，参数需要继续调优`);
-  }
+  if (result.complexBeatsTriangleRate < 0.9) throw new Error(`[${id}] 复杂结构对三角结构优势不足，参数需要继续调优`);
+  if (result.complexAndTriangleBeatSingleRate < 0.92) throw new Error(`[${id}] 单杆仍然过强，参数需要继续调优`);
 }
 
 assertMaterialOrdering();
-assertBreakageVisibility(breakageByMaterial);
+const totalByMaterial = assertSingleAxisBreakage(breakageByMaterial);
+console.log('SingleAxisBreakageTotalByMaterial:', totalByMaterial);
