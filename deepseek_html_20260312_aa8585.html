@@ -290,9 +290,9 @@
         const container = document.getElementById('canvas-container');
 
         const MATERIALS = {
-            wood:   { id: 'wood',   name: '木条', color: '#8e44ad', cost: 40,  strength: 18,   nodeStrength: 15,   density: 0.005, stiffness: 0.85, angleStrength: 0.25, nodeCost: 20  },
-            steel:  { id: 'steel',  name: '钢材', color: '#2c3e50', cost: 160, strength: 50,   nodeStrength: 70,   density: 0.015, stiffness: 0.95, angleStrength: 0.40, nodeCost: 60  },
-            carbon: { id: 'carbon', name: '碳纤', color: '#2980b9', cost: 400, strength: 120,  nodeStrength: 150,  density: 0.003, stiffness: 0.99, angleStrength: 0.60, nodeCost: 160 }
+            wood:   { id: 'wood',   name: '木条', color: '#8e44ad', cost: 40,  strength: 13,   nodeStrength: 10,   density: 0.005, stiffness: 0.72, angleStrength: 0.20, nodeCost: 20  },
+            steel:  { id: 'steel',  name: '钢材', color: '#2c3e50', cost: 160, strength: 40,   nodeStrength: 56,   density: 0.015, stiffness: 0.86, angleStrength: 0.34, nodeCost: 60  },
+            carbon: { id: 'carbon', name: '碳纤', color: '#2980b9', cost: 400, strength: 98,   nodeStrength: 120,  density: 0.003, stiffness: 0.93, angleStrength: 0.50, nodeCost: 160 }
         };
 
         const CONFIG = { gravity: 0.5, groundHeight: 60, snapDist: 15, maxStickLen: 120, scale: 50, nodeBaseCost: 100, angleStiffness: 0.1, stressSmoothing: 0.74, isolationPenalty: 1.5, redundancyBonusPerLink: 0.12, maxRedundancyBonus: 1.55, bucklingFactor: 1.15 };
@@ -316,14 +316,14 @@
 
         function getWindForceAtY(y) {
             if (!isSimulating || !envActive || env.wind <= 0) return 0;
-            const amplitude = (groundY - y) / 1000 * (env.wind / 0.4);
+            const amplitude = (groundY - y) / 780 * (env.wind / 0.22);
             return Math.sin(Date.now() / 350) * amplitude * envRampUp;
         }
 
         function getQuakeOffsets() {
             if (!isSimulating || !envActive || env.quake <= 0) return { x: 0, y: 0 };
             const t = Date.now();
-            return { x: Math.sin(t / 50) * (env.quake / 10), y: Math.cos(t / 65) * (env.quake / 15) };
+            return { x: Math.sin(t / 50) * (env.quake / 7), y: Math.cos(t / 65) * (env.quake / 10) };
         }
 
         class Debris {
@@ -396,23 +396,23 @@
                 if (!isSimulating) { this.oldx = this.x; this.oldy = this.y; return; }
                 if (this.pinned) return;
 
-                let vx = (this.x - this.oldx) * 0.98, vy = (this.y - this.oldy) * 0.98;
+                let vx = (this.x - this.oldx) * 0.9, vy = (this.y - this.oldy) * 0.9;
                 this.oldx = this.x; this.oldy = this.y;
                 
                 this.y += CONFIG.gravity; 
                 
                 if (envActive && groundY - this.y > 100) {
-                    this.y += env.load * 0.16 * envRampUp;
+                    this.y += env.load * 0.34 * envRampUp;
                 } 
                 
                 let windForce = getWindForceAtY(this.y);
-                this.x += (windForce * 0.2) / this.mass; 
+                this.x += (windForce * 0.3) / this.mass; 
                 
                 this.x += vx; this.y += vy;
                 
                 if (envActive && isSimulating && env.quake > 0 && !this.pinned) {
-                    this.x += (Math.random() - 0.5) * (env.quake / 2) * envRampUp;
-                    this.y += (Math.random() - 0.5) * (env.quake / 3) * envRampUp;
+                    this.x += (Math.random() - 0.5) * (env.quake / 1.1) * envRampUp;
+                    this.y += (Math.random() - 0.5) * (env.quake / 1.6) * envRampUp;
                 }
             }
 
@@ -424,7 +424,7 @@
                     else { this.x += (this.baseX - this.x) * 0.1; this.y = groundY; }
                     this.oldx = this.x; this.oldy = this.y;
                 } else {
-                    if (this.y > groundY) { let vy = this.y - this.oldy; this.y = groundY; this.oldy = this.y + vy * 0.5; }
+                    if (this.y > groundY) { let vy = this.y - this.oldy; this.y = groundY; this.oldy = this.y + vy * 0.15; }
                 }
             }
         }
