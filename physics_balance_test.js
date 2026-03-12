@@ -5,7 +5,7 @@ const CONFIG = {
   bucklingFactor: 1.15,
 };
 
-const MATERIAL = { strength: 50 };
+const MATERIAL = { strength: 40 };
 
 function redundancyBonus(deg1, deg2) {
   const extraLinks = Math.max(0, deg1 + deg2 - 2);
