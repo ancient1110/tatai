@@ -20,6 +20,24 @@ function loadMaterialsFromHtml() {
 
 const MATERIALS = loadMaterialsFromHtml();
 
+
+function loadSliderMaxFromHtml(sliderId) {
+  const htmlPath = path.join(__dirname, 'deepseek_html_20260312_aa8585.html');
+  const html = fs.readFileSync(htmlPath, 'utf8');
+  const tagRegex = new RegExp(`<input[^>]*id="${sliderId}"[^>]*>`, 'i');
+  const tag = html.match(tagRegex);
+  if (!tag) throw new Error(`无法找到 ${sliderId} 的 input 标签`);
+  const maxMatch = tag[0].match(/max="(\d+)"/i);
+  if (!maxMatch) throw new Error(`无法读取 ${sliderId} 的 max 值`);
+  return parseInt(maxMatch[1], 10);
+}
+
+const ENV_MAX = {
+  wind: loadSliderMaxFromHtml('slider-wind'),
+  quake: loadSliderMaxFromHtml('slider-quake'),
+  load: loadSliderMaxFromHtml('slider-load'),
+};
+
 function redundancyBonus(deg1, deg2) {
   const extraLinks = Math.max(0, deg1 + deg2 - 2);
   return Math.min(CONFIG.maxRedundancyBonus, 1 + extraLinks * CONFIG.redundancyBonusPerLink);
@@ -74,9 +92,10 @@ function runEdgeChecksForAllMaterials() {
 }
 
 const AXIS_CASES = {
-  wind: { strainBase: 6.2, compressionRatio: 0.52, len: 112 },
-  quake: { strainBase: 7.1, compressionRatio: 0.56, len: 116 },
-  load: { strainBase: 8.3, compressionRatio: 0.62, len: 120 },
+  // 以 UI 最大档位(100)为基准，按单轴独立建模
+  wind:  { baseStrainAtMax: 7.2, compressionRatio: 0.58, len: 116 },
+  quake: { baseStrainAtMax: 8.8, compressionRatio: 0.62, len: 120 },
+  load:  { baseStrainAtMax: 10.6, compressionRatio: 0.66, len: 124 },
 };
 
 function runSingleAxisBreakageForMaterial(materialId, rounds = 2000) {
@@ -88,11 +107,13 @@ function runSingleAxisBreakageForMaterial(materialId, rounds = 2000) {
 
     for (let i = 0; i < rounds; i++) {
       const jitter = () => (Math.random() - 0.5) * 0.2;
-      const overload = Math.random() < 0.1 ? 2.8 + Math.random() * 1.2 : 1 + Math.random() * 0.85;
+      const axisLevel = ENV_MAX[axis];
+      const normalizedAxis = axisLevel / ENV_MAX[axis]; // 固定在 1，即最大测试强度
+      const overload = Math.random() < 0.12 ? 2.6 + Math.random() * 1.4 : 1 + Math.random() * 0.95;
 
-      // 单轴测试：每轮只使用当前 axis 对应扰动模型，其它两项视为 0
+      // 单轴测试：每轮只使用当前 axis，对应其它两项固定为 0
       const stress = memberStress({
-        strain: profile.strainBase * overload * (1 + jitter()),
+        strain: profile.baseStrainAtMax * normalizedAxis * overload * (1 + jitter()),
         compressionRatio: profile.compressionRatio * (1 + jitter()),
         len: profile.len * (1 + jitter()),
         deg1: 1,
@@ -150,10 +171,15 @@ const monteCarloByMaterial = Object.fromEntries(Object.entries(MATERIALS).map(([
 const edgeCases = runEdgeChecksForAllMaterials();
 const breakageByMaterial = Object.fromEntries(Object.keys(MATERIALS).map(id => [id, runSingleAxisBreakageForMaterial(id)]));
 
+console.log('EnvMaxLevels:', ENV_MAX);
 console.log('Materials:', Object.fromEntries(Object.entries(MATERIALS).map(([id, m]) => [id, { strength: m.strength, stiffness: m.stiffness, nodeStrength: m.nodeStrength }])));
 console.log('MonteCarloByMaterial:', monteCarloByMaterial);
 console.log('EdgeCasesByMaterial:', edgeCases);
 console.log('SingleAxisBreakageByMaterial:', breakageByMaterial);
+
+for (const [axis, max] of Object.entries(ENV_MAX)) {
+  if (max !== 100) throw new Error(`${axis} 测试强度上限不是 100，当前为 ${max}`);
+}
 
 for (const [id, result] of Object.entries(monteCarloByMaterial)) {
   if (result.complexBeatsTriangleRate < 0.9) throw new Error(`[${id}] 复杂结构对三角结构优势不足，参数需要继续调优`);
