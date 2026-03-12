@@ -406,7 +406,7 @@
                 } 
                 
                 let windForce = getWindForceAtY(this.y);
-                this.x += (windForce * 0.3) / this.mass; 
+                this.x += (windForce * 0.3 * (this.mat.windFactor || 1)) / this.mass; 
                 
                 this.x += vx; this.y += vy;
                 
