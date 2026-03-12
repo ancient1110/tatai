@@ -290,9 +290,9 @@
         const container = document.getElementById('canvas-container');
 
         const MATERIALS = {
-            wood:   { id: 'wood',   name: '木条', color: '#8e44ad', cost: 40,  strength: 13,   nodeStrength: 10,   density: 0.005, stiffness: 0.72, angleStrength: 0.20, nodeCost: 20  },
-            steel:  { id: 'steel',  name: '钢材', color: '#2c3e50', cost: 160, strength: 40,   nodeStrength: 56,   density: 0.015, stiffness: 0.86, angleStrength: 0.34, nodeCost: 60  },
-            carbon: { id: 'carbon', name: '碳纤', color: '#2980b9', cost: 400, strength: 98,   nodeStrength: 120,  density: 0.003, stiffness: 0.93, angleStrength: 0.50, nodeCost: 160 }
+            wood:   { id: 'wood',   name: '木条', color: '#8e44ad', cost: 40,  strength: 8.5,  nodeStrength: 6.5,  density: 0.005, stiffness: 0.72, angleStrength: 0.11, nodeCost: 20  },
+            steel:  { id: 'steel',  name: '钢材', color: '#2c3e50', cost: 160, strength: 24,   nodeStrength: 30,   density: 0.015, stiffness: 0.86, angleStrength: 0.19, nodeCost: 60  },
+            carbon: { id: 'carbon', name: '碳纤', color: '#2980b9', cost: 400, strength: 52,   nodeStrength: 62,   density: 0.003, stiffness: 0.93, angleStrength: 0.28, nodeCost: 160 }
         };
 
         const CONFIG = { gravity: 0.5, groundHeight: 60, snapDist: 15, maxStickLen: 120, scale: 50, nodeBaseCost: 100, angleStiffness: 0.1, stressSmoothing: 0.74, isolationPenalty: 1.5, redundancyBonusPerLink: 0.12, maxRedundancyBonus: 1.55, bucklingFactor: 1.15 };
@@ -437,6 +437,8 @@
                 this.stress = 0; 
                 this.broken = false; this.wasBroken = false; this.breakOrder = 0;             
                 this.stiffness = this.mat.stiffness; 
+                this.lastStrain = 0;
+                this.lastCompressionRatio = 0;
             }
 
             shatter() {
@@ -461,6 +463,8 @@
                 let diff = this.len - dist; 
                 let strain = Math.abs(diff) / Math.max(this.len, 1);
                 let compressionRatio = Math.max(0, diff) / Math.max(this.len, 1);
+                this.lastStrain = strain;
+                this.lastCompressionRatio = compressionRatio;
                 let slenderness = Math.min(2.2, this.len / 65);
                 let bucklingStress = compressionRatio * slenderness * CONFIG.bucklingFactor;
                 this.frameStress += strain * (1 + bucklingStress);
@@ -492,20 +496,22 @@
                 const extraLinks = Math.max(0, deg1 + deg2 - 2);
                 const redundancyBonus = Math.min(CONFIG.maxRedundancyBonus, 1 + extraLinks * CONFIG.redundancyBonusPerLink);
                 const isolationPenalty = (Math.min(deg1, deg2) <= 1) ? CONFIG.isolationPenalty : 1;
-                const effectiveStress = this.stress * isolationPenalty / redundancyBonus;
+                const visualDeformPenalty = 1 + Math.min(1.1, this.lastStrain * 4.2);
+                const compressionPenalty = 1 + Math.min(0.55, this.lastCompressionRatio * 5.5);
+                const effectiveStress = this.stress * isolationPenalty * visualDeformPenalty * compressionPenalty / redundancyBonus;
 
-                // 杆件强度：焊接点轻度补偿，但不再无限放大单杆表现
+                // 杆件强度：焊接点仅提供极轻微补偿，优先保证“明显形变就会断”的视觉反馈
                 let stickStrength = this.mat.strength;
-                if (this.p1.isWeld || this.p2.isWeld) stickStrength *= 1.2;
+                if (this.p1.isWeld || this.p2.isWeld) stickStrength *= 1.08;
 
                 if (effectiveStress > stickStrength) {
                     this.shatter(); 
                     return; 
                 }
 
-                // 节点强度：焊点保留适度加成，同时纳入拓扑奖励
-                let ns1 = this.p1.isWeld ? this.p1.mat.nodeStrength * 1.4 : this.p1.mat.nodeStrength;
-                let ns2 = this.p2.isWeld ? this.p2.mat.nodeStrength * 1.4 : this.p2.mat.nodeStrength;
+                // 节点强度：焊点加成同步收紧，避免节点“神奇抗断”
+                let ns1 = this.p1.isWeld ? this.p1.mat.nodeStrength * 1.16 : this.p1.mat.nodeStrength;
+                let ns2 = this.p2.isWeld ? this.p2.mat.nodeStrength * 1.16 : this.p2.mat.nodeStrength;
 
                 let jointStress = effectiveStress;
                 if (jointStress > Math.min(ns1, ns2)) {
@@ -732,10 +738,19 @@
                     }
                 }
                 
-                if (maxAngleDiff > node.mat.angleStrength && !node.broken && !node.isGhost) {
-                    newBroken = true; 
-                    c.node.pinned = false; 
-                    sticks.forEach(s => { if (!s.broken && (s.p1 === node || s.p2 === node)) s.frameStress += 15; });
+                const angleLimit = node.mat.angleStrength;
+                if (maxAngleDiff > angleLimit && !node.broken && !node.isGhost) {
+                    newBroken = true;
+                    c.node.pinned = false;
+
+                    if (maxAngleDiff > angleLimit * 1.22) {
+                        node.shatter();
+                        continue;
+                    }
+
+                    sticks.forEach(s => {
+                        if (!s.broken && (s.p1 === node || s.p2 === node)) s.frameStress += 24;
+                    });
                 }
             }
             if (newBroken) angleConstraints = angleConstraints.filter(c => !c.node.broken && !c.node.isGhost);
