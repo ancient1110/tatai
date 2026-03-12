@@ -295,7 +295,7 @@
             carbon: { id: 'carbon', name: '碳纤', color: '#2980b9', cost: 400, strength: 52,   nodeStrength: 62,   density: 0.003, stiffness: 0.93, angleStrength: 0.28, nodeCost: 160 }
         };
 
-        const CONFIG = { gravity: 0.5, groundHeight: 60, snapDist: 15, maxStickLen: 120, scale: 50, nodeBaseCost: 100, angleStiffness: 0.1, stressSmoothing: 0.74, isolationPenalty: 1.5, redundancyBonusPerLink: 0.12, maxRedundancyBonus: 1.55, bucklingFactor: 1.15 };
+        const CONFIG = { gravity: 0.5, groundHeight: 60, snapDist: 15, maxStickLen: 120, scale: 50, nodeBaseCost: 100, angleStiffness: 0.1, stressSmoothing: 0.74, isolationPenalty: 1.5, redundancyBonusPerLink: 0.12, maxRedundancyBonus: 1.55, bucklingFactor: 1.15, testSeverityMultiplier: 5 };
 
         let width, height, groundY;
         let points = [], sticks = [], debrisList = [], welds = [];                 
@@ -496,9 +496,9 @@
                 const extraLinks = Math.max(0, deg1 + deg2 - 2);
                 const redundancyBonus = Math.min(CONFIG.maxRedundancyBonus, 1 + extraLinks * CONFIG.redundancyBonusPerLink);
                 const isolationPenalty = (Math.min(deg1, deg2) <= 1) ? CONFIG.isolationPenalty : 1;
-                const visualDeformPenalty = 1 + Math.min(1.1, this.lastStrain * 4.2);
-                const compressionPenalty = 1 + Math.min(0.55, this.lastCompressionRatio * 5.5);
-                const effectiveStress = this.stress * isolationPenalty * visualDeformPenalty * compressionPenalty / redundancyBonus;
+                const visualDeformPenalty = 1 + Math.min(1.35, this.lastStrain * 4.8);
+                const compressionPenalty = 1 + Math.min(0.72, this.lastCompressionRatio * 6.2);
+                const effectiveStress = this.stress * isolationPenalty * visualDeformPenalty * compressionPenalty * CONFIG.testSeverityMultiplier / redundancyBonus;
 
                 // 杆件强度：焊接点仅提供极轻微补偿，优先保证“明显形变就会断”的视觉反馈
                 let stickStrength = this.mat.strength;
@@ -739,11 +739,12 @@
                 }
                 
                 const angleLimit = node.mat.angleStrength;
-                if (maxAngleDiff > angleLimit && !node.broken && !node.isGhost) {
+                const effectiveAngleDiff = maxAngleDiff * CONFIG.testSeverityMultiplier;
+                if (effectiveAngleDiff > angleLimit && !node.broken && !node.isGhost) {
                     newBroken = true;
                     c.node.pinned = false;
 
-                    if (maxAngleDiff > angleLimit * 1.22) {
+                    if (effectiveAngleDiff > angleLimit * 1.22) {
                         node.shatter();
                         continue;
                     }
