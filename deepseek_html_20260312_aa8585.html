@@ -316,7 +316,7 @@
 
         function getWindForceAtY(y) {
             if (!isSimulating || !envActive || env.wind <= 0) return 0;
-            const amplitude = (groundY - y) / 780 * (env.wind / 0.22);
+            const amplitude = (groundY - y) / 780 * (env.wind / 0.44);
             return Math.sin(Date.now() / 350) * amplitude * envRampUp;
         }
 
@@ -402,7 +402,7 @@
                 this.y += CONFIG.gravity; 
                 
                 if (envActive && groundY - this.y > 100) {
-                    this.y += env.load * 0.62 * envRampUp;
+                    this.y += env.load * 1.24 * envRampUp;
                 } 
                 
                 let windForce = getWindForceAtY(this.y);
@@ -1156,7 +1156,7 @@
         };
         window.updateEnv = (type, val) => {
             env[type] = parseInt(val);
-            let display = type === 'load' ? (parseInt(val) * 100) + 'kg' : val + '级';
+            let display = val + '级';
             document.getElementById(`val-${type}`).innerText = display;
         };
         window.toggleSimulation = () => {
