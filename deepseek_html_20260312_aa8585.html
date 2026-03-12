@@ -290,12 +290,12 @@
         const container = document.getElementById('canvas-container');
 
         const MATERIALS = {
-            wood:   { id: 'wood',   name: '木条', color: '#8e44ad', cost: 40,  strength: 18,   nodeStrength: 15,   density: 0.005, stiffness: 0.85, angleStrength: 0.25, nodeCost: 20  },
-            steel:  { id: 'steel',  name: '钢材', color: '#2c3e50', cost: 160, strength: 50,   nodeStrength: 70,   density: 0.015, stiffness: 0.95, angleStrength: 0.40, nodeCost: 60  },
-            carbon: { id: 'carbon', name: '碳纤', color: '#2980b9', cost: 400, strength: 120,  nodeStrength: 150,  density: 0.003, stiffness: 0.99, angleStrength: 0.60, nodeCost: 160 }
+            wood:   { id: 'wood',   name: '木条', color: '#8e44ad', cost: 40,  strength: 18,   nodeStrength: 15,   density: 0.005, stiffness: 0.82, angleStrength: 0.22, nodeCost: 20,  stressScale: 240, fatigueGain: 0.65  },
+            steel:  { id: 'steel',  name: '钢材', color: '#2c3e50', cost: 160, strength: 50,   nodeStrength: 70,   density: 0.015, stiffness: 0.92, angleStrength: 0.36, nodeCost: 60,  stressScale: 300, fatigueGain: 0.35  },
+            carbon: { id: 'carbon', name: '碳纤', color: '#2980b9', cost: 400, strength: 120,  nodeStrength: 150,  density: 0.003, stiffness: 0.97, angleStrength: 0.56, nodeCost: 160, stressScale: 360, fatigueGain: 0.20 }
         };
 
-        const CONFIG = { gravity: 0.5, groundHeight: 60, snapDist: 15, maxStickLen: 120, scale: 50, nodeBaseCost: 100, angleStiffness: 0.1 };
+        const CONFIG = { gravity: 0.5, groundHeight: 60, snapDist: 15, maxStickLen: 120, scale: 50, nodeBaseCost: 100, angleStiffness: 0.1, stressSmoothing: 0.55, isolationPenalty: 1.9, redundancyBonusPerLink: 0.08, maxRedundancyBonus: 1.35, bucklingFactor: 1.45 };
 
         let width, height, groundY;
         let points = [], sticks = [], debrisList = [], welds = [];                 
@@ -396,7 +396,7 @@
                 if (!isSimulating) { this.oldx = this.x; this.oldy = this.y; return; }
                 if (this.pinned) return;
 
-                let vx = (this.x - this.oldx) * 0.98, vy = (this.y - this.oldy) * 0.98;
+                let vx = (this.x - this.oldx) * 0.93, vy = (this.y - this.oldy) * 0.93;
                 this.oldx = this.x; this.oldy = this.y;
                 
                 this.y += CONFIG.gravity; 
@@ -437,6 +437,7 @@
                 this.stress = 0; 
                 this.broken = false; this.wasBroken = false; this.breakOrder = 0;             
                 this.stiffness = this.mat.stiffness; 
+                this.fatigue = 0; 
             }
 
             shatter() {
@@ -459,7 +460,12 @@
                 if (dist === 0) return;
 
                 let diff = this.len - dist; 
-                this.frameStress += Math.abs(diff); 
+                let strain = Math.abs(diff) / Math.max(this.len, 1);
+                let compressionRatio = Math.max(0, diff) / Math.max(this.len, 1);
+                let slenderness = Math.min(2.2, this.len / 65);
+                let bucklingStress = compressionRatio * slenderness * CONFIG.bucklingFactor;
+                let axialStress = strain * this.mat.stressScale;
+                this.frameStress += axialStress * (1 + bucklingStress * 1.6);
                 
                 let percent = (diff / dist) * 0.5 * this.stiffness;
                 let ox = dx * percent, oy = dy * percent;
@@ -483,20 +489,31 @@
             checkBreakage() {
                 if (this.broken || !isSimulating || preheatRemaining > 0) return;
 
-                // 如果杆件任一端点是焊接节点，杆件本身也获得 1.5 倍强度补偿
-                let stickStrength = this.mat.strength;
-                if (this.p1.isWeld || this.p2.isWeld) stickStrength *= 1.5;
+                const deg1 = getPointConnectivity(this.p1);
+                const deg2 = getPointConnectivity(this.p2);
+                const extraLinks = Math.max(0, deg1 + deg2 - 2);
+                const redundancyBonus = Math.min(CONFIG.maxRedundancyBonus, 1 + extraLinks * CONFIG.redundancyBonusPerLink);
+                const isolationPenalty = (Math.min(deg1, deg2) <= 1) ? CONFIG.isolationPenalty : 1;
+                const effectiveStress = this.stress * isolationPenalty / redundancyBonus;
 
-                if (this.stress > stickStrength) {
+                // 杆件强度：焊接点轻度补偿，但不再无限放大单杆表现
+                let stickStrength = this.mat.strength;
+                if (this.p1.isWeld || this.p2.isWeld) stickStrength *= 1.2;
+
+                let stressRatio = effectiveStress / Math.max(stickStrength, 0.001);
+                if (stressRatio > 0.55) this.fatigue += (stressRatio - 0.55) * this.mat.fatigueGain;
+                else this.fatigue *= 0.985;
+
+                if ((effectiveStress + this.fatigue) > stickStrength) {
                     this.shatter(); 
                     return; 
                 }
 
-                // 核心补偿：如果该节点是焊接产生的，我们赋予它 1.5 倍的节点抗裂强度，弥补模拟中的刚性惩罚
-                let ns1 = this.p1.isWeld ? this.p1.mat.nodeStrength * 2.0 : this.p1.mat.nodeStrength;
-                let ns2 = this.p2.isWeld ? this.p2.mat.nodeStrength * 2.0 : this.p2.mat.nodeStrength;
+                // 节点强度：焊点保留适度加成，同时纳入拓扑奖励
+                let ns1 = this.p1.isWeld ? this.p1.mat.nodeStrength * 1.4 : this.p1.mat.nodeStrength;
+                let ns2 = this.p2.isWeld ? this.p2.mat.nodeStrength * 1.4 : this.p2.mat.nodeStrength;
 
-                let jointStress = this.stress; 
+                let jointStress = effectiveStress + this.fatigue * 0.65;
                 if (jointStress > Math.min(ns1, ns2)) {
                     if (ns1 < jointStress && !this.p1.pinned && !this.p1.broken && !this.p1.isGhost) this.p1.shatter();
                     if (ns2 < jointStress && !this.p2.pinned && !this.p2.broken && !this.p2.isGhost) this.p2.shatter();
@@ -600,6 +617,15 @@
 
         function addPoint(x, y, pinned, matId) { let p = new Point(x, y, pinned, matId); points.push(p); return p; }
 
+        function getPointConnectivity(point) {
+            let count = 0;
+            for (let s of sticks) {
+                if (s.broken) continue;
+                if (s.p1 === point || s.p2 === point) count++;
+            }
+            return count;
+        }
+
         function saveHistory() {
             let snapshot = {
                 points: points.map(p => ({ x: p.x, y: p.y, pinned: p.pinned, matId: p.mat.id, broken: p.broken, wasBroken: p.wasBroken, breakOrder: p.breakOrder })),
@@ -611,7 +637,7 @@
 
         function restoreFromHistory(snapshot) {
             points = snapshot.points.map(p => { let pt = new Point(p.x, p.y, p.pinned, p.matId); pt.broken = p.broken; pt.wasBroken = p.wasBroken; pt.breakOrder = p.breakOrder; return pt; });
-            sticks = snapshot.sticks.map(s => { let p1 = points[s.p1Idx], p2 = points[s.p2Idx]; let st = new Stick(p1, p2, s.matId); st.broken = s.broken; st.wasBroken = s.wasBroken; st.breakOrder = s.breakOrder; st.len = s.len || Math.hypot(p1.x - p2.x, p1.y - p2.y); return st; });
+            sticks = snapshot.sticks.map(s => { let p1 = points[s.p1Idx], p2 = points[s.p2Idx]; let st = new Stick(p1, p2, s.matId); st.fatigue = 0; st.broken = s.broken; st.wasBroken = s.wasBroken; st.breakOrder = s.breakOrder; st.len = s.len || Math.hypot(p1.x - p2.x, p1.y - p2.y); return st; });
             welds = snapshot.welds.map(w => new WeldConstraint(points[w.pIdx], sticks[w.sIdx], w.t));
             angleConstraints = []; debrisList = []; 
         }
@@ -763,7 +789,7 @@
             if (isSimulating) {
                 if (angleConstraints.length > 0) checkAngleBreaks();
                 sticks.forEach(s => {
-                    s.stress = s.frameStress;
+                    s.stress = s.stress * CONFIG.stressSmoothing + s.frameStress * (1 - CONFIG.stressSmoothing);
                     s.checkBreakage();
                 });
             }
