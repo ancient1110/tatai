@@ -95,14 +95,43 @@ function runEdgeChecksForAllMaterials() {
     const byMaterial = Object.fromEntries(
       Object.entries(MATERIALS).map(([id, mat]) => [
         id,
-        Number(
-          capacityScore({ materialStrength: mat.strength, ...c }).toFixed(2)
-        ),
+        Number(capacityScore({ materialStrength: mat.strength, ...c }).toFixed(2)),
       ])
     );
 
     return { ...c, capacity: byMaterial };
   });
+}
+
+function runBreakageFrequencyForMaterial(materialId, rounds = 4000) {
+  const materialStrength = MATERIALS[materialId].strength;
+  let brokenCount = 0;
+
+  for (let i = 0; i < rounds; i++) {
+    const jitter = () => (Math.random() - 0.5) * 0.22;
+    const overloadMultiplier =
+      Math.random() < 0.12
+        ? 3.5 + Math.random() * 1.8 // 少量极端冲击，确保高强材料也能出现断裂样本
+        : 1 + Math.random() * 0.9; // 常规高压扰动
+
+    const stress = memberStress({
+      strain: 8.8 * overloadMultiplier * (1 + jitter()),
+      compressionRatio: 0.58 * (1 + jitter()),
+      len: 116 * (1 + jitter()),
+      deg1: 1,
+      deg2: 1,
+    });
+
+    if (stress > materialStrength) {
+      brokenCount++;
+    }
+  }
+
+  return {
+    rounds,
+    brokenCount,
+    breakRate: brokenCount / rounds,
+  };
 }
 
 function assertMaterialOrdering() {
@@ -116,17 +145,36 @@ function assertMaterialOrdering() {
   }
 }
 
+function assertBreakageVisibility(breakageByMaterial) {
+  for (const [id, summary] of Object.entries(breakageByMaterial)) {
+    if (summary.brokenCount === 0) {
+      throw new Error(`[${id}] 在高压单杆场景中未出现断裂，无法体现该材料断裂行为`);
+    }
+  }
+
+  if (breakageByMaterial.wood.breakRate < 0.65) {
+    throw new Error(`木条断裂率偏低(${breakageByMaterial.wood.breakRate.toFixed(3)}), 未达到“经常断裂”预期`);
+  }
+
+  if (!(breakageByMaterial.wood.breakRate > breakageByMaterial.steel.breakRate && breakageByMaterial.steel.breakRate > breakageByMaterial.carbon.breakRate)) {
+    throw new Error('断裂频率层级异常：期望 wood > steel > carbon');
+  }
+}
+
 const monteCarloByMaterial = Object.fromEntries(
-  Object.entries(MATERIALS).map(([id, mat]) => [
-    id,
-    runMonteCarloForMaterial(mat.strength),
-  ])
+  Object.entries(MATERIALS).map(([id, mat]) => [id, runMonteCarloForMaterial(mat.strength)])
 );
 const edgeCases = runEdgeChecksForAllMaterials();
+const breakageByMaterial = Object.fromEntries(
+  Object.keys(MATERIALS).map(id => [id, runBreakageFrequencyForMaterial(id)])
+);
 
-console.log('Materials:', Object.fromEntries(Object.entries(MATERIALS).map(([id, m]) => [id, { strength: m.strength, stiffness: m.stiffness, nodeStrength: m.nodeStrength }])));
+console.log('Materials:', Object.fromEntries(
+  Object.entries(MATERIALS).map(([id, m]) => [id, { strength: m.strength, stiffness: m.stiffness, nodeStrength: m.nodeStrength }])
+));
 console.log('MonteCarloByMaterial:', monteCarloByMaterial);
 console.log('EdgeCasesByMaterial:', edgeCases);
+console.log('BreakageByMaterial:', breakageByMaterial);
 
 for (const [id, result] of Object.entries(monteCarloByMaterial)) {
   if (result.complexBeatsTriangleRate < 0.9) {
@@ -138,3 +186,4 @@ for (const [id, result] of Object.entries(monteCarloByMaterial)) {
 }
 
 assertMaterialOrdering();
+assertBreakageVisibility(breakageByMaterial);
