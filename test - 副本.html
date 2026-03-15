@@ -316,7 +316,7 @@
 
         function getWindForceAtY(y) {
             if (!isSimulating || !envActive || env.wind <= 0) return 0;
-            const amplitude = (groundY - y) / 780 * (env.wind / 0.44) * 1.3;
+            const amplitude = (groundY - y) / 780 * (env.wind / 0.44) * 1.56;
             return Math.sin(Date.now() / 350) * amplitude * envRampUp;
         }
 
@@ -402,7 +402,7 @@
                 this.y += CONFIG.gravity; 
                 
                 if (envActive && groundY - this.y > 100) {
-                    this.y += env.load * 1.24 * envRampUp;
+                    this.y += env.load * 1.116 * envRampUp;
                 } 
                 
                 let windForce = getWindForceAtY(this.y);
